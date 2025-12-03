@@ -4,6 +4,8 @@ Contains the create_app factory function for initializing the Flask application.
 """
 
 from flask import Flask
+from flask_cors import CORS
+from routes import register_blueprints
 
 
 def create_app():
@@ -14,16 +16,18 @@ def create_app():
     Returns:
         Flask: Configured Flask application instance
     """
-    # TODO: Initialize Flask app
-    # TODO: Load configuration
-    # TODO: Register blueprints
-    # TODO: Initialize extensions
-    pass
+    app = Flask(__name__)
+    
+    # Enable CORS for React Native frontend
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    
+    # Register all route blueprints
+    register_blueprints(app)
+    
+    return app
 
 
 if __name__ == "__main__":
-    # TODO: Create app instance and run server
-    # app = create_app()
-    # app.run(debug=True)
-    pass
+    app = create_app()
+    app.run(debug=True, host="0.0.0.0", port=5000)
 
