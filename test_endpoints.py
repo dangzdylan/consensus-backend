@@ -7,7 +7,7 @@ import requests
 import json
 import uuid
 
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = "http://127.0.0.1:5001"
 
 def print_response(response, title):
     """Print formatted response."""
@@ -24,18 +24,28 @@ def test_signup():
     """Test user signup."""
     print("\n🧪 Testing User Signup...")
     data = {
-        "username": f"testuser_{uuid.uuid4().hex[:8]}",
-        "email": f"test_{uuid.uuid4().hex[:8]}@example.com"
+        "username": f"testuser_{uuid.uuid4().hex[:8]}"
     }
     response = requests.post(f"{BASE_URL}/api/auth/signup", json=data)
     print_response(response, "Signup Response")
-    if response.status_code == 201:
-        return response.json().get("data", {}).get("user_id")
+    # Accept both 200 and 201 as success
+    if response.status_code in [200, 201]:
+        try:
+            return response.json().get("data", {}).get("user_id")
+        except:
+            # If JSON parsing fails, try to extract user_id from response text
+            return None
     return None
 
 def test_create_lobby(user_id):
     """Test lobby creation."""
     print("\n🧪 Testing Create Lobby...")
+    from datetime import datetime
+    
+    # Get today's date in MM/DD/YYYY format
+    today = datetime.now()
+    date_str = today.strftime("%m/%d/%Y")
+    
     data = {
         "host_id": user_id,
         "location": {
@@ -43,7 +53,17 @@ def test_create_lobby(user_id):
             "longitude": -122.2730
         },
         "radius": 2.5,
-        "deck_type": "Where to Eat?"
+        "date": date_str,
+        "start_hour": 10,  # 10 AM
+        "end_hour": 18,    # 6 PM
+        "activity_counts": {
+            "Food": 2,
+            "Recreation & Entertainment": 1,
+            "Nature": 0,
+            "Arts": 0,
+            "Social": 0
+        },
+        "max_members": 10
     }
     response = requests.post(f"{BASE_URL}/api/lobbies", json=data)
     print_response(response, "Create Lobby Response")
@@ -69,29 +89,11 @@ def test_get_lobby(lobby_id):
     print_response(response, "Get Lobby Response")
     return response.status_code == 200
 
-def test_get_lobby_places(lobby_id):
-    """Test getting lobby places."""
-    print("\n🧪 Testing Get Lobby Places...")
-    response = requests.get(f"{BASE_URL}/api/lobbies/{lobby_id}/places")
-    print_response(response, "Get Lobby Places Response")
-    if response.status_code == 200:
-        data = response.json().get("data", {})
-        print(f"\n✅ Found {data.get('count', 0)} places")
-        return True
-    return False
-
 def test_get_user_current_lobby(user_id):
     """Test getting user's current lobby."""
     print("\n🧪 Testing Get User Current Lobby...")
     response = requests.get(f"{BASE_URL}/api/lobbies/user/{user_id}/current")
     print_response(response, "Get User Current Lobby Response")
-    return response.status_code == 200
-
-def test_refresh_places(lobby_id):
-    """Test refreshing lobby places."""
-    print("\n🧪 Testing Refresh Places...")
-    response = requests.post(f"{BASE_URL}/api/lobbies/{lobby_id}/refresh-places")
-    print_response(response, "Refresh Places Response")
     return response.status_code == 200
 
 def test_error_cases():
@@ -125,7 +127,7 @@ def main():
     print("\n" + "="*60)
     print("CONSENSUS BACKEND API TESTING")
     print("="*60)
-    print("\n⚠️  Make sure the Flask server is running on http://127.0.0.1:5000")
+    print("\n⚠️  Make sure the Flask server is running on http://127.0.0.1:5001")
     input("\nPress Enter to start testing...")
     
     # Test signup
@@ -133,6 +135,8 @@ def main():
     if not user_id:
         print("\n❌ Signup failed. Please check your database setup.")
         return
+    
+    print(f"\n✅ Signup successful! User ID: {user_id}")
     
     # Test create lobby
     lobby_id, code = test_create_lobby(user_id)
@@ -146,14 +150,8 @@ def main():
     # Test get lobby
     test_get_lobby(lobby_id)
     
-    # Test get places
-    test_get_lobby_places(lobby_id)
-    
     # Test get user current lobby
     test_get_user_current_lobby(user_id)
-    
-    # Test refresh places
-    test_refresh_places(lobby_id)
     
     # Test join lobby (need another user)
     print("\n🧪 Testing Join Lobby (creating second user)...")

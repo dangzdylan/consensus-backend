@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify
 from supabase_client import supabase
 from models.lobby import Lobby
 from utils.validators import validate_location, validate_radius, validate_lobby_code
-from utils.helpers import generate_uuid, format_error_response, format_success_response
+from utils.helpers import generate_uuid, format_error_response, format_success_response, jsonify_error, jsonify_success
 from datetime import datetime
 
 lobby_bp = Blueprint("lobby", __name__)
@@ -43,7 +43,7 @@ def create_lobby():
         data = request.get_json()
         
         if not data:
-            return jsonify(*format_error_response("Request body is required", 400))
+            return jsonify_error("Request body is required", 400)
         
         # Validate required fields
         host_id = data.get("host_id")
@@ -56,73 +56,73 @@ def create_lobby():
         max_members = data.get("max_members", 25)
         
         if not host_id:
-            return jsonify(*format_error_response("host_id is required", 400))
+            return jsonify_error("host_id is required", 400)
         
         if not location:
-            return jsonify(*format_error_response("location is required", 400))
+            return jsonify_error("location is required", 400)
         
         if radius is None:
-            return jsonify(*format_error_response("radius is required", 400))
+            return jsonify_error("radius is required", 400)
         
         if not date:
-            return jsonify(*format_error_response("date is required", 400))
+            return jsonify_error("date is required", 400)
         
         if start_hour is None:
-            return jsonify(*format_error_response("start_hour is required", 400))
+            return jsonify_error("start_hour is required", 400)
         
         if end_hour is None:
-            return jsonify(*format_error_response("end_hour is required", 400))
+            return jsonify_error("end_hour is required", 400)
         
         if not activity_counts or not isinstance(activity_counts, dict):
-            return jsonify(*format_error_response("activity_counts is required and must be a dictionary", 400))
+            return jsonify_error("activity_counts is required and must be a dictionary", 400)
         
         # Validate location
         is_valid, error_msg = validate_location(location)
         if not is_valid:
-            return jsonify(*format_error_response(error_msg, 400))
+            return jsonify_error(error_msg, 400)
         
         # Validate radius
         is_valid, error_msg = validate_radius(radius)
         if not is_valid:
-            return jsonify(*format_error_response(error_msg, 400))
+            return jsonify_error(error_msg, 400)
         
         # Validate date format (MM/DD/YYYY)
         import re
         date_pattern = r'^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$'
         if not re.match(date_pattern, date):
-            return jsonify(*format_error_response("date must be in MM/DD/YYYY format", 400))
+            return jsonify_error("date must be in MM/DD/YYYY format", 400)
         
         # Validate hours
         if not isinstance(start_hour, int) or not (0 <= start_hour <= 23):
-            return jsonify(*format_error_response("start_hour must be an integer between 0 and 23", 400))
+            return jsonify_error("start_hour must be an integer between 0 and 23", 400)
         
         if not isinstance(end_hour, int) or not (0 <= end_hour <= 23):
-            return jsonify(*format_error_response("end_hour must be an integer between 0 and 23", 400))
+            return jsonify_error("end_hour must be an integer between 0 and 23", 400)
         
         if start_hour >= end_hour:
-            return jsonify(*format_error_response("end_hour must be after start_hour", 400))
+            return jsonify_error("end_hour must be after start_hour", 400)
         
         # Validate activity_counts
         total_activities = sum(activity_counts.values())
         if total_activities == 0:
-            return jsonify(*format_error_response("At least one activity must be selected", 400))
+            return jsonify_error("At least one activity must be selected", 400)
         
         if total_activities > 10:
-            return jsonify(*format_error_response("Maximum 10 activities allowed", 400))
+            return jsonify_error("Maximum 10 activities allowed", 400)
         
         # Validate max_members
         if not isinstance(max_members, int) or max_members < 2 or max_members > 25:
-            return jsonify(*format_error_response("max_members must be between 2 and 25", 400))
+            return jsonify_error("max_members must be between 2 and 25", 400)
         
         # Check if user exists
         user_response = supabase.table("users").select("*").eq("user_id", host_id).execute()
         if not user_response.data:
-            return jsonify(*format_error_response("User not found", 404))
+            return jsonify_error("User not found", 404)
         
         # Check if user is already in a lobby
         user = user_response.data[0]
         if user.get("current_lobby_id"):
-            return jsonify(*format_error_response("User is already in a lobby", 400))
+            return jsonify_error("User is already in a lobby", 400)
         
         # Generate unique lobby ID and code
         lobby_id = generate_uuid()
@@ -148,7 +148,7 @@ def create_lobby():
             if not existing.data:
                 break
         else:
-            return jsonify(*format_error_response("Failed to generate unique lobby code", 500))
+            return jsonify_error("Failed to generate unique lobby code", 500)
         
         # Create lobby object
         lobby = Lobby(
@@ -169,7 +169,7 @@ def create_lobby():
         lobby_response = supabase.table("lobbies").insert(lobby_data).execute()
         
         if not lobby_response.data:
-            return jsonify(*format_error_response("Failed to create lobby", 500))
+            return jsonify_error("Failed to create lobby", 500)
         
         # Update user's current_lobby_id
         supabase.table("users").update({
@@ -177,7 +177,7 @@ def create_lobby():
             "updated_at": datetime.utcnow().isoformat()
         }).eq("user_id", host_id).execute()
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
                 "lobby_id": lobby_id,
                 "code": code,
@@ -193,10 +193,10 @@ def create_lobby():
             },
             "Lobby created successfully",
             201
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @lobby_bp.route("/join", methods=["POST"])
@@ -217,20 +217,20 @@ def join_lobby():
         data = request.get_json()
         
         if not data:
-            return jsonify(*format_error_response("Request body is required", 400))
+            return jsonify_error("Request body is required", 400)
         
         code = data.get("code")
         user_id = data.get("user_id")
         
         if not code:
-            return jsonify(*format_error_response("code is required", 400))
+            return jsonify_error("code is required", 400)
         
         if not user_id:
-            return jsonify(*format_error_response("user_id is required", 400))
+            return jsonify_error("user_id is required", 400)
         
         # Validate code format
         if not validate_lobby_code(code):
-            return jsonify(*format_error_response("Invalid lobby code format", 400))
+            return jsonify_error("Invalid lobby code format", 400)
         
         # Normalize code to uppercase
         code = code.upper()
@@ -239,35 +239,35 @@ def join_lobby():
         lobby_response = supabase.table("lobbies").select("*").eq("code", code).execute()
         
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
         lobby_data = lobby_response.data[0]
         
         # Check if lobby is joinable (waiting or voting status)
         lobby_status = lobby_data.get("status", "waiting")
         if lobby_status not in ["waiting", "voting"]:
-            return jsonify(*format_error_response("Lobby is not accepting new members", 400))
+            return jsonify_error("Lobby is not accepting new members", 400)
         
         # Check if lobby is full
         current_members = len(lobby_data.get("user_ids", []))
         max_members = lobby_data.get("max_members", 25)
         if current_members >= max_members:
-            return jsonify(*format_error_response("Lobby is full", 400))
+            return jsonify_error("Lobby is full", 400)
         
         # Check if user exists
         user_response = supabase.table("users").select("*").eq("user_id", user_id).execute()
         if not user_response.data:
-            return jsonify(*format_error_response("User not found", 404))
+            return jsonify_error("User not found", 404)
         
         user = user_response.data[0]
         
         # Check if user is already in this lobby
         if user_id in lobby_data.get("user_ids", []):
-            return jsonify(*format_error_response("User is already in this lobby", 400))
+            return jsonify_error("User is already in this lobby", 400)
         
         # Check if user is in another lobby
         if user.get("current_lobby_id") and user.get("current_lobby_id") != lobby_data.get("lobby_id"):
-            return jsonify(*format_error_response("User is already in another lobby", 400))
+            return jsonify_error("User is already in another lobby", 400)
         
         # Add user to lobby
         user_ids = lobby_data.get("user_ids", [])
@@ -289,14 +289,14 @@ def join_lobby():
         # Fetch updated lobby data
         updated_lobby = supabase.table("lobbies").select("*").eq("lobby_id", lobby_data.get("lobby_id")).execute()
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             updated_lobby.data[0] if updated_lobby.data else lobby_data,
             "Successfully joined lobby",
             200
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @lobby_bp.route("/<lobby_id>", methods=["GET"])
@@ -314,12 +314,12 @@ def get_lobby(lobby_id):
         lobby_response = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
         
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
-        return jsonify(*format_success_response(lobby_response.data[0], "Lobby retrieved successfully"))
+        return jsonify_success(lobby_response.data[0], "Lobby retrieved successfully")
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @lobby_bp.route("/user/<user_id>/current", methods=["GET"])
@@ -338,23 +338,23 @@ def get_user_current_lobby(user_id):
         user_response = supabase.table("users").select("current_lobby_id").eq("user_id", user_id).execute()
         
         if not user_response.data:
-            return jsonify(*format_error_response("User not found", 404))
+            return jsonify_error("User not found", 404)
         
         current_lobby_id = user_response.data[0].get("current_lobby_id")
         
         if not current_lobby_id:
-            return jsonify(*format_success_response(None, "User is not in any lobby"))
+            return jsonify_success(None, "User is not in any lobby")
         
         # Get lobby details
         lobby_response = supabase.table("lobbies").select("*").eq("lobby_id", current_lobby_id).execute()
         
         if not lobby_response.data:
-            return jsonify(*format_success_response(None, "Lobby not found"))
+            return jsonify_success(None, "Lobby not found")
         
-        return jsonify(*format_success_response(lobby_response.data[0], "Current lobby retrieved successfully"))
+        return jsonify_success(lobby_response.data[0], "Current lobby retrieved successfully")
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @lobby_bp.route("/<lobby_id>/status", methods=["GET"])
@@ -372,7 +372,7 @@ def get_lobby_status(lobby_id):
         # Get lobby
         lobby_response = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
         lobby = lobby_response.data[0]
         user_ids = lobby.get("user_ids", [])
@@ -392,7 +392,7 @@ def get_lobby_status(lobby_id):
         
         all_ready = len(members) > 0 and all(m.get("isReady", False) for m in members)
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
                 "lobby_id": lobby_id,
                 "code": lobby.get("code"),
@@ -403,10 +403,10 @@ def get_lobby_status(lobby_id):
                 "current_members": len(members)
             },
             "Lobby status retrieved successfully"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @lobby_bp.route("/<lobby_id>/member/<user_id>/ready", methods=["POST"])
@@ -429,10 +429,10 @@ def set_member_ready(lobby_id, user_id):
         # Check if user is in lobby
         lobby_response = supabase.table("lobbies").select("user_ids").eq("lobby_id", lobby_id).execute()
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
         if user_id not in lobby_response.data[0].get("user_ids", []):
-            return jsonify(*format_error_response("User is not in this lobby", 403))
+            return jsonify_error("User is not in this lobby", 403)
         
         # Update user's ready status
         supabase.table("users").update({
@@ -440,11 +440,11 @@ def set_member_ready(lobby_id, user_id):
             "updated_at": datetime.utcnow().isoformat()
         }).eq("user_id", user_id).execute()
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {"user_id": user_id, "is_ready": ready},
             "Ready status updated successfully"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
