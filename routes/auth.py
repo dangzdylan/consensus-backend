@@ -5,7 +5,7 @@ Handles user login and signup endpoints.
 
 from flask import Blueprint, request, jsonify
 from supabase_client import supabase
-from utils.validators import validate_email, validate_username
+from utils.validators import validate_username
 from utils.helpers import generate_uuid, format_error_response, format_success_response
 from datetime import datetime
 
@@ -19,9 +19,7 @@ def signup():
     
     Expected JSON body:
     {
-        "username": "string",
-        "email": "string",
-        "password": "string" (optional for now, auth handled by Supabase)
+        "username": "string"
     }
     
     Returns:
@@ -34,35 +32,25 @@ def signup():
             return jsonify(*format_error_response("Request body is required", 400))
         
         username = data.get("username")
-        email = data.get("email")
         
         if not username:
             return jsonify(*format_error_response("username is required", 400))
-        
-        if not email:
-            return jsonify(*format_error_response("email is required", 400))
         
         # Validate username
         is_valid, error_msg = validate_username(username)
         if not is_valid:
             return jsonify(*format_error_response(error_msg, 400))
         
-        # Validate email
-        if not validate_email(email):
-            return jsonify(*format_error_response("Invalid email format", 400))
-        
-        # Check if username or email already exists
+        # Check if username already exists
         username_check = supabase.table("users").select("*").eq("username", username).execute()
-        email_check = supabase.table("users").select("*").eq("email", email).execute()
-        if username_check.data or email_check.data:
-            return jsonify(*format_error_response("Username or email already exists", 409))
+        if username_check.data:
+            return jsonify(*format_error_response("Username already exists", 409))
         
         # Create user
         user_id = generate_uuid()
         user_data = {
             "user_id": user_id,
             "username": username,
-            "email": email,
             "location": {},
             "current_lobby_id": None,
             "created_at": datetime.utcnow().isoformat(),
@@ -87,12 +75,11 @@ def signup():
 @auth_bp.route("/login", methods=["POST"])
 def login():
     """
-    Login user (placeholder - actual auth handled by Supabase Auth).
+    Login user by username.
     
     Expected JSON body:
     {
-        "email": "string",
-        "password": "string"
+        "username": "string"
     }
     
     Returns:
@@ -104,13 +91,13 @@ def login():
         if not data:
             return jsonify(*format_error_response("Request body is required", 400))
         
-        email = data.get("email")
+        username = data.get("username")
         
-        if not email:
-            return jsonify(*format_error_response("email is required", 400))
+        if not username:
+            return jsonify(*format_error_response("username is required", 400))
         
-        # Find user by email
-        user_response = supabase.table("users").select("*").eq("email", email).execute()
+        # Find user by username
+        user_response = supabase.table("users").select("*").eq("username", username).execute()
         
         if not user_response.data:
             return jsonify(*format_error_response("User not found", 404))

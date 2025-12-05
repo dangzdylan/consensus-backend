@@ -26,14 +26,14 @@ def validate_lobby_code(code: str) -> bool:
     Validate lobby join code format.
     
     Args:
-        code: Lobby code to validate (should be 4 alphanumeric characters)
+        code: Lobby code to validate (should be 4-6 alphanumeric characters)
         
     Returns:
         bool: True if code is valid, False otherwise
     """
-    if not code or len(code) != 4:
+    if not code or len(code) < 4 or len(code) > 6:
         return False
-    pattern = r'^[A-Z0-9]{4}$'
+    pattern = r'^[A-Z0-9]{4,6}$'
     return bool(re.match(pattern, code.upper()))
 
 

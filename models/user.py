@@ -14,7 +14,7 @@ class User:
     Attributes:
         user_id: Unique identifier for the user
         username: User's username
-        email: User's email address
+        email: User's email address (optional, for backward compatibility)
         location: User's current location (latitude, longitude)
         current_lobby_id: ID of the lobby the user is currently in (if any)
         created_at: Timestamp when the user was created
@@ -25,7 +25,7 @@ class User:
         self,
         user_id: str,
         username: str,
-        email: str,
+        email: Optional[str] = None,
         location: Optional[Dict[str, float]] = None,
         current_lobby_id: Optional[str] = None,
         created_at: Optional[datetime] = None,
@@ -41,15 +41,18 @@ class User:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert User instance to dictionary."""
-        return {
+        result = {
             "user_id": self.user_id,
             "username": self.username,
-            "email": self.email,
             "location": self.location,
             "current_lobby_id": self.current_lobby_id,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
+        # Only include email if it exists (for backward compatibility)
+        if self.email:
+            result["email"] = self.email
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "User":

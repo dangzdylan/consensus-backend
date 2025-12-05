@@ -380,14 +380,15 @@ def _map_google_type_to_activity_category(google_type: str) -> str:
     return category_mapping.get(google_type, "sightseeing")
 
 
-def fetch_restaurants(
+def fetch_restaurants_mock(
     latitude: float,
     longitude: float,
     radius_miles: float,
     limit: int = 50
 ) -> List[Dict[str, Any]]:
     """
-    Fetch restaurants using the preferred API.
+    Generate mock restaurant data for development/testing.
+    Useful when API keys are not available.
     
     Args:
         latitude: Latitude of the center point
@@ -396,22 +397,153 @@ def fetch_restaurants(
         limit: Maximum number of results
         
     Returns:
-        List of restaurant dictionaries (empty list if API keys not configured)
+        List of mock restaurant dictionaries
     """
+    import random
+    
+    mock_restaurants = [
+        {"name": "The Local Bistro", "cuisine_type": "American", "price_range": "$$"},
+        {"name": "Sakura Sushi", "cuisine_type": "Japanese", "price_range": "$$$"},
+        {"name": "Mama's Italian Kitchen", "cuisine_type": "Italian", "price_range": "$$"},
+        {"name": "Taco Fiesta", "cuisine_type": "Mexican", "price_range": "$"},
+        {"name": "Burger Palace", "cuisine_type": "American", "price_range": "$"},
+        {"name": "Golden Dragon", "cuisine_type": "Chinese", "price_range": "$$"},
+        {"name": "Le French Cafe", "cuisine_type": "French", "price_range": "$$$"},
+        {"name": "Pizza Corner", "cuisine_type": "Italian", "price_range": "$"},
+        {"name": "BBQ Smokehouse", "cuisine_type": "American", "price_range": "$$"},
+        {"name": "Thai Garden", "cuisine_type": "Thai", "price_range": "$$"},
+    ]
+    
+    restaurants = []
+    for i, mock in enumerate(mock_restaurants[:min(limit, len(mock_restaurants))]):
+        # Generate slightly offset coordinates within radius
+        offset_lat = latitude + random.uniform(-0.01, 0.01) * (radius_miles / 5)
+        offset_lng = longitude + random.uniform(-0.01, 0.01) * (radius_miles / 5)
+        
+        restaurant = {
+            "name": mock["name"],
+            "address": f"{random.randint(100, 9999)} Main St, City, State",
+            "location": {
+                "latitude": offset_lat,
+                "longitude": offset_lng
+            },
+            "cuisine_type": mock["cuisine_type"],
+            "rating": round(random.uniform(3.5, 5.0), 1),
+            "price_range": mock["price_range"],
+            "phone": f"(555) {random.randint(100, 999)}-{random.randint(1000, 9999)}",
+            "image_url": None,
+            "yelp_id": None,
+            "google_place_id": None,
+            "hours": None
+        }
+        restaurants.append(restaurant)
+    
+    return restaurants
+
+
+def fetch_restaurants(
+    latitude: float,
+    longitude: float,
+    radius_miles: float,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Fetch restaurants using the preferred API.
+    Falls back to mock data if API keys are not configured.
+    
+    Args:
+        latitude: Latitude of the center point
+        longitude: Longitude of the center point
+        radius_miles: Search radius in miles
+        limit: Maximum number of results
+        
+    Returns:
+        List of restaurant dictionaries (mock data if API keys not configured)
+    """
+    # Check if we should use mock data
+    USE_MOCK = os.getenv("USE_MOCK_PLACES", "false").lower() == "true"
+    
+    if USE_MOCK:
+        print("Using mock restaurant data (USE_MOCK_PLACES=true)")
+        return fetch_restaurants_mock(latitude, longitude, radius_miles, limit)
+    
     try:
         if PREFERRED_API.lower() == "google":
             if not GOOGLE_PLACES_API_KEY:
-                print("Warning: GOOGLE_PLACES_API_KEY not set, skipping restaurant fetch")
-                return []
+                print("Warning: GOOGLE_PLACES_API_KEY not set, using mock data")
+                return fetch_restaurants_mock(latitude, longitude, radius_miles, limit)
             return fetch_restaurants_google(latitude, longitude, radius_miles, limit)
         else:
             if not YELP_API_KEY:
-                print("Warning: YELP_API_KEY not set, skipping restaurant fetch")
-                return []
+                print("Warning: YELP_API_KEY not set, using mock data")
+                return fetch_restaurants_mock(latitude, longitude, radius_miles, limit)
             return fetch_restaurants_yelp(latitude, longitude, radius_miles, limit)
     except Exception as e:
-        print(f"Warning: Failed to fetch restaurants: {str(e)}")
-        return []
+        print(f"Warning: Failed to fetch restaurants: {str(e)}, using mock data")
+        return fetch_restaurants_mock(latitude, longitude, radius_miles, limit)
+
+
+def fetch_activities_mock(
+    latitude: float,
+    longitude: float,
+    radius_miles: float,
+    categories: Optional[List[str]] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Generate mock activity data for development/testing.
+    Useful when API keys are not available.
+    
+    Args:
+        latitude: Latitude of the center point
+        longitude: Longitude of the center point
+        radius_miles: Search radius in miles
+        categories: List of activity categories
+        limit: Maximum number of results
+        
+    Returns:
+        List of mock activity dictionaries
+    """
+    import random
+    
+    mock_activities = [
+        {"name": "Central Park", "category": "parks"},
+        {"name": "City Art Museum", "category": "museums"},
+        {"name": "Riverside Trail", "category": "parks"},
+        {"name": "Local Theater", "category": "art"},
+        {"name": "Sports Complex", "category": "sports"},
+        {"name": "Shopping District", "category": "shopping"},
+        {"name": "Historic Landmark", "category": "sightseeing"},
+        {"name": "Concert Hall", "category": "concerts"},
+        {"name": "Adventure Park", "category": "games"},
+        {"name": "Beach Boardwalk", "category": "sightseeing"},
+    ]
+    
+    activities = []
+    for i, mock in enumerate(mock_activities[:min(limit, len(mock_activities))]):
+        # Generate slightly offset coordinates within radius
+        offset_lat = latitude + random.uniform(-0.01, 0.01) * (radius_miles / 5)
+        offset_lng = longitude + random.uniform(-0.01, 0.01) * (radius_miles / 5)
+        
+        activity = {
+            "name": mock["name"],
+            "category": mock["category"],
+            "address": f"{random.randint(100, 9999)} Activity St, City, State",
+            "location": {
+                "latitude": offset_lat,
+                "longitude": offset_lng
+            },
+            "rating": round(random.uniform(3.5, 5.0), 1),
+            "price_range": random.choice(["Free", "$", "$$"]),
+            "phone": f"(555) {random.randint(100, 999)}-{random.randint(1000, 9999)}",
+            "image_url": None,
+            "yelp_id": None,
+            "google_place_id": None,
+            "hours": None
+        }
+        activities.append(activity)
+    
+    return activities
 
 
 def fetch_activities(
@@ -423,6 +555,7 @@ def fetch_activities(
 ) -> List[Dict[str, Any]]:
     """
     Fetch activities using the preferred API.
+    Falls back to mock data if API keys are not configured.
     
     Args:
         latitude: Latitude of the center point
@@ -432,20 +565,27 @@ def fetch_activities(
         limit: Maximum number of results
         
     Returns:
-        List of activity dictionaries (empty list if API keys not configured)
+        List of activity dictionaries (mock data if API keys not configured)
     """
+    # Check if we should use mock data
+    USE_MOCK = os.getenv("USE_MOCK_PLACES", "false").lower() == "true"
+    
+    if USE_MOCK:
+        print("Using mock activity data (USE_MOCK_PLACES=true)")
+        return fetch_activities_mock(latitude, longitude, radius_miles, categories, limit)
+    
     try:
         if PREFERRED_API.lower() == "google":
             if not GOOGLE_PLACES_API_KEY:
-                print("Warning: GOOGLE_PLACES_API_KEY not set, skipping activity fetch")
-                return []
+                print("Warning: GOOGLE_PLACES_API_KEY not set, using mock data")
+                return fetch_activities_mock(latitude, longitude, radius_miles, categories, limit)
             return fetch_activities_google(latitude, longitude, radius_miles, categories, limit)
         else:
             if not YELP_API_KEY:
-                print("Warning: YELP_API_KEY not set, skipping activity fetch")
-                return []
+                print("Warning: YELP_API_KEY not set, using mock data")
+                return fetch_activities_mock(latitude, longitude, radius_miles, categories, limit)
             return fetch_activities_yelp(latitude, longitude, radius_miles, categories, limit)
     except Exception as e:
-        print(f"Warning: Failed to fetch activities: {str(e)}")
-        return []
+        print(f"Warning: Failed to fetch activities: {str(e)}, using mock data")
+        return fetch_activities_mock(latitude, longitude, radius_miles, categories, limit)
 

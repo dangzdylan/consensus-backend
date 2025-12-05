@@ -28,8 +28,8 @@ class Lobby:
     """
     
     @staticmethod
-    def generate_code(length: int = 4) -> str:
-        """Generate a random alphanumeric code."""
+    def generate_code(length: int = 6) -> str:
+        """Generate a random alphanumeric code (4-6 characters)."""
         characters = string.ascii_uppercase + string.digits
         # Exclude ambiguous characters (0, O, I, 1)
         characters = characters.replace('0', '').replace('O', '').replace('I', '').replace('1', '')
@@ -41,11 +41,15 @@ class Lobby:
         host_id: str,
         location: Dict[str, float],
         radius: float,
-        deck_type: str = "Where to Eat?",
+        date: str,  # MM/DD/YYYY format
+        start_hour: int,  # 0-23
+        end_hour: int,  # 0-23
+        activity_counts: Dict[str, int],  # {category: count}
+        max_members: int = 25,
         code: Optional[str] = None,
         user_ids: Optional[List[str]] = None,
-        status: str = "active",
-        scheduled_time: Optional[datetime] = None,
+        status: str = "waiting",  # waiting, voting, completed, cancelled
+        current_round: int = 0,  # Current voting round
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None
     ):
@@ -55,9 +59,13 @@ class Lobby:
         self.user_ids = user_ids or [host_id]  # Host is automatically added
         self.location = location
         self.radius = radius
-        self.deck_type = deck_type
+        self.date = date
+        self.start_hour = start_hour
+        self.end_hour = end_hour
+        self.activity_counts = activity_counts
+        self.max_members = max_members
         self.status = status
-        self.scheduled_time = scheduled_time
+        self.current_round = current_round
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
     
@@ -70,9 +78,13 @@ class Lobby:
             "user_ids": self.user_ids,
             "location": self.location,
             "radius": self.radius,
-            "deck_type": self.deck_type,
+            "date": self.date,
+            "start_hour": self.start_hour,
+            "end_hour": self.end_hour,
+            "activity_counts": self.activity_counts,
+            "max_members": self.max_members,
             "status": self.status,
-            "scheduled_time": self.scheduled_time.isoformat() if isinstance(self.scheduled_time, datetime) else self.scheduled_time,
+            "current_round": self.current_round,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
@@ -85,11 +97,15 @@ class Lobby:
             host_id=data.get("host_id"),
             location=data.get("location", {}),
             radius=data.get("radius", 2.5),
-            deck_type=data.get("deck_type", "Where to Eat?"),
+            date=data.get("date", ""),
+            start_hour=data.get("start_hour", 12),
+            end_hour=data.get("end_hour", 18),
+            activity_counts=data.get("activity_counts", {}),
+            max_members=data.get("max_members", 25),
             code=data.get("code"),
             user_ids=data.get("user_ids", []),
-            status=data.get("status", "active"),
-            scheduled_time=data.get("scheduled_time"),
+            status=data.get("status", "waiting"),
+            current_round=data.get("current_round", 0),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at")
         )

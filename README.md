@@ -8,7 +8,24 @@ This is the Flask backend server for the Consensus project.
 
 ## Setup
 
-See `SETUP.md` for detailed setup instructions.
+1. **Create a virtual environment**:
+   ```bash
+   python3 -m venv venv
+   ```
+
+2. **Activate your virtual environment**:
+   ```bash
+   # On Mac/Linux:
+   source venv/bin/activate
+   
+   # On Windows:
+   venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Running the Server
 
@@ -46,13 +63,26 @@ See `SETUP.md` for detailed setup instructions.
 
 5. **To stop the server**, press `Ctrl+C` in your terminal.
 
+## Testing
+
+Quick test:
+```bash
+# Start the server
+python app.py
+
+# In another terminal, run the test script
+python test_endpoints.py
+```
+
 ## Project Structure
 
 - `app.py` - Flask application entrypoint
 - `routes/` - API route handlers
 - `models/` - Data models
-- `schemas/` - Database schema definitions
 - `utils/` - Utility functions
+- `services/` - Service layer (places service)
+- `data/` - Hardcoded places data
 - `tests/` - Test files
+- `test_endpoints.py` - Simple endpoint testing script
 
 
