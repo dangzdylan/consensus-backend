@@ -6,6 +6,7 @@ Handles filtering and retrieving hardcoded places data.
 import math
 from typing import List, Dict, Any, Optional
 from data.places import ALL_PLACES, get_coords, parse_hours
+from services.image_service import get_place_image_url, generate_placeholder_image_url
 
 # Map frontend categories to our data categories
 CATEGORY_MAP = {
@@ -105,24 +106,33 @@ def get_places_by_category_and_location(
     return places_with_distance
 
 
-def format_place_as_option(place: Dict[str, Any]) -> Dict[str, Any]:
+def format_place_as_option(place: Dict[str, Any], fetch_images: bool = False) -> Dict[str, Any]:
     """
     Format a place dictionary to match the Option model structure.
     
     Args:
-        place: Place dictionary from data
+        place: Place dictionary from data (now includes hardcoded image_url)
+        fetch_images: Ignored - images are now hardcoded in places data
     
     Returns:
-        Formatted option dictionary
+        Formatted option dictionary with image URL from hardcoded data
     """
+    place_name = place.get("name", "Unknown")
+    category = place.get("category", "Food")
+    
+    # Use hardcoded image_url from places data, fallback to placeholder if missing
+    image_url = place.get("image_url")
+    if not image_url:
+        image_url = generate_placeholder_image_url(place_name)
+    
     return {
-        "name": place.get("name", "Unknown"),
-        "category": place.get("category", "Food"),
+        "name": place_name,
+        "category": category,
         "location": place.get("location", {}),
         "distance": place.get("distance"),
         "address": place.get("address", ""),
         "hours": place.get("hours", {}),
-        "image_url": None,  # Can be added later
+        "image_url": image_url,
     }
 
 
@@ -146,8 +156,9 @@ def get_options_for_round(
     """
     places = get_places_by_category_and_location(category, location, radius, limit=count * 2)
     
-    # Format as options
-    options = [format_place_as_option(place) for place in places[:count]]
+    # Format as options - don't fetch images during game start to avoid blocking
+    # Images will be fetched later or can be updated asynchronously
+    options = [format_place_as_option(place, fetch_images=False) for place in places[:count]]
     
     return options
 

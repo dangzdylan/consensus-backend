@@ -149,9 +149,9 @@ def join_lobby():
         
         lobby_data = lobby_response.data[0]
         
-        # Check if lobby is joinable (waiting or voting status)
+        # Check if lobby is joinable (only waiting status allows new members)
         lobby_status = lobby_data.get("status", "waiting")
-        if lobby_status not in ["waiting", "voting"]:
+        if lobby_status != "waiting":
             return jsonify_error("Lobby is not accepting new members", 400)
         
         # Check if lobby is full

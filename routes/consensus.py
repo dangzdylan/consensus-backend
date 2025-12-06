@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from supabase_client import supabase
 from utils.helpers import generate_uuid, jsonify_error, jsonify_success
 from models.option import Option
+from services.places_service import get_options_for_round
 from datetime import datetime
 import random
 
@@ -79,6 +80,17 @@ def start_game(lobby_id):
         if lobby.get("host_id") != user_id:
             return jsonify_error("Only the host can start the game", 403)
         
+        # Check if rounds already exist for this lobby
+        existing_rounds = supabase.table("rounds").select("round_id").eq("lobby_id", lobby_id).execute()
+        
+        # If rounds exist, return success (game already started)
+        if existing_rounds.data:
+            current_round = lobby.get("current_round", 1)
+            return jsonify_success(
+                {"lobby_id": lobby_id, "status": lobby.get("status", "voting"), "current_round": current_round},
+                "Game already started"
+            )
+        
         # Initialize rounds if not present
         if not lobby.get("current_round"):
             # Get activity counts
@@ -87,17 +99,27 @@ def start_game(lobby_id):
             # Generate rounds
             rounds = []
             round_num = 1
-            # Defined order
+            # Defined order - map frontend categories to places service categories
+            category_mapping = {
+                "Food": "Food",
+                "Activity": "Recreation & Entertainment",  # Map Activity to Recreation & Entertainment
+                "Recreation & Entertainment": "Recreation & Entertainment",
+                "Arts": "Arts",
+                "Nature": "Nature",
+                "Social": "Social"
+            }
             valid_cats = ["Food", "Activity", "Arts", "Nature", "Social", "Recreation & Entertainment"]
             
             for cat in valid_cats:
                 # Check for direct match or sloppy keys from frontend
                 count = activity_counts.get(cat, 0)
                 if count > 0:
+                    # Map category to places service category
+                    mapped_category = category_mapping.get(cat, cat)
                     for _ in range(count):
                         rounds.append({
                             "round_number": round_num, 
-                            "category": cat, 
+                            "category": mapped_category,  # Use mapped category for places service
                             "status": "active" if round_num == 1 else "pending"
                         })
                         round_num += 1
@@ -109,6 +131,10 @@ def start_game(lobby_id):
             # Prepare batch data
             rounds_to_insert = []
             options_to_insert = []
+            
+            # Get lobby location and radius for filtering places
+            lobby_location = lobby.get("location", {})
+            lobby_radius = lobby.get("radius", 5.0)
             
             for r in rounds:
                 round_id = generate_uuid()
@@ -122,30 +148,87 @@ def start_game(lobby_id):
                 }
                 rounds_to_insert.append(round_data)
                 
-                # Seed mock options
-                mock_options = generate_mock_options(lobby_id, r["round_number"], r["category"])
-                options_to_insert.extend(mock_options)
+                # Get real hardcoded places for this category
+                try:
+                    places_options = get_options_for_round(
+                        category=r["category"],
+                        location=lobby_location,
+                        radius=lobby_radius,
+                        count=10  # Get 10 options per round
+                    )
+                    
+                    # Format options with required fields for database
+                    for place in places_options:
+                        option_id = generate_uuid()
+                        option_data = {
+                            "option_id": option_id,
+                            "lobby_id": lobby_id,
+                            "round_number": r["round_number"],
+                            "category": r["category"],
+                            "name": place.get("name", "Unknown"),
+                            "location": place.get("location", {}),
+                            "distance": place.get("distance"),
+                            "image_url": place.get("image_url"),
+                            "hours": place.get("hours", {}),
+                            "address": place.get("address", ""),
+                            "created_at": datetime.utcnow().isoformat()
+                        }
+                        options_to_insert.append(option_data)
+                except Exception as e:
+                    # Fallback to mock options if places service fails
+                    print(f"Error getting places for {r['category']}: {str(e)}")
+                    mock_options = generate_mock_options(lobby_id, r["round_number"], r["category"])
+                    options_to_insert.extend(mock_options)
             
             # Execute batch inserts
-            if rounds_to_insert:
-                supabase.table("rounds").insert(rounds_to_insert).execute()
-            
-            if options_to_insert:
-                supabase.table("options").insert(options_to_insert).execute()
-            
-            # Update lobby status
-            supabase.table("lobbies").update({
-                "status": "voting",
-                "current_round": 1,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("lobby_id", lobby_id).execute()
+            try:
+                if rounds_to_insert:
+                    supabase.table("rounds").insert(rounds_to_insert).execute()
+                
+                if options_to_insert:
+                    supabase.table("options").insert(options_to_insert).execute()
+                
+                # Update lobby status
+                supabase.table("lobbies").update({
+                    "status": "voting",
+                    "current_round": 1,
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("lobby_id", lobby_id).execute()
+            except Exception as insert_error:
+                # Check if it's a duplicate key error
+                error_str = str(insert_error)
+                if "duplicate key" in error_str.lower() or "23505" in error_str:
+                    # Rounds were created by another request, just return success
+                    return jsonify_success(
+                        {"lobby_id": lobby_id, "status": "voting", "current_round": 1},
+                        "Game started successfully"
+                    )
+                # Re-raise if it's a different error
+                raise
+        
+        # Get updated lobby status
+        updated_lobby = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
+        lobby_status = updated_lobby.data[0].get("status", "voting") if updated_lobby.data else "voting"
+        current_round = updated_lobby.data[0].get("current_round", 1) if updated_lobby.data else 1
         
         return jsonify_success(
-            {"lobby_id": lobby_id, "status": "voting", "current_round": 1},
+            {"lobby_id": lobby_id, "status": lobby_status, "current_round": current_round},
             "Game started successfully"
         )
         
     except Exception as e:
+        error_str = str(e)
+        # Check if it's a duplicate key error
+        if "duplicate key" in error_str.lower() or "23505" in error_str:
+            # Game was already started, return success
+            updated_lobby = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
+            if updated_lobby.data:
+                lobby_status = updated_lobby.data[0].get("status", "voting")
+                current_round = updated_lobby.data[0].get("current_round", 1)
+                return jsonify_success(
+                    {"lobby_id": lobby_id, "status": lobby_status, "current_round": current_round},
+                    "Game already started"
+                )
         return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
@@ -243,21 +326,12 @@ def get_round_status(lobby_id, round_number):
         consensus_reached = False
         winning_option_id = None
         
-        print(f"DEBUG: Votes count: {len(votes)}")
-        print(f"DEBUG: Option scores: {option_scores}")
-
         if option_scores:
             best_option = max(option_scores.items(), key=lambda x: x[1])
-            print(f"DEBUG: Best option: {best_option}")
             
             if best_option[1] > 0: # Threshold logic
                 winning_option_id = best_option[0]
                 consensus_reached = True
-                print(f"DEBUG: Consensus reached! Winner: {winning_option_id}")
-            else:
-                print(f"DEBUG: Best score {best_option[1]} <= 0, no consensus")
-        else:
-             print("DEBUG: No option scores calculated")
         
         return jsonify_success(
             {
