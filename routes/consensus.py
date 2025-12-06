@@ -1,184 +1,165 @@
 """
 Consensus routes module.
-Handles swipe/match cycle endpoints for the consensus process.
+Handles game state, voting, and consensus logic.
 """
 
 from flask import Blueprint, request, jsonify
 from supabase_client import supabase
-from models.vote import Vote
-from models.round import Round
+from utils.helpers import generate_uuid, jsonify_error, jsonify_success
 from models.option import Option
-from services.places_service import get_options_for_round
-from utils.helpers import generate_uuid, format_error_response, format_success_response
 from datetime import datetime
+import random
 
 consensus_bp = Blueprint("consensus", __name__)
+
+
+def generate_mock_options(lobby_id, round_number, category):
+    """Generate mock options for a round."""
+    options = []
+    
+    if category == "Food":
+        names = ["Burger King", "Sushi Place", "Pizza Hut", "Taco Bell", "McDonalds", "Thai Spice", "Indian Curry House", "The Sandwich Spot", "Pasta Palace", "Steakhouse"]
+        base_img = "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=500&q=80"
+    else:
+        names = ["Movie Theater", "Park Walk", "Bowling Alley", "Karaoke", "Escape Room", "Museum", "Arcade", "Zoo", "Beach Trip", "Concert"]
+        base_img = "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=500&q=80"
+        
+    selected = random.sample(names, min(5, len(names)))
+    
+    for i, name in enumerate(selected):
+        option_id = generate_uuid()
+        opt = {
+            "option_id": option_id,
+            "lobby_id": lobby_id,
+            "round_number": round_number,
+            "category": category,
+            "name": name,
+            "location": {"latitude": 37.7749 + (random.random() - 0.5) * 0.01, "longitude": -122.4194 + (random.random() - 0.5) * 0.01},
+            "distance": round(random.random() * 5, 1),
+            "image_url": base_img,
+            "hours": {"open": 9, "close": 22},
+            "address": f"{random.randint(100, 999)} Main St",
+            "created_at": datetime.utcnow().isoformat()
+        }
+        options.append(opt)
+    
+    return options
 
 
 @consensus_bp.route("/lobby/<lobby_id>/start", methods=["POST"])
 def start_game(lobby_id):
     """
-    Start the voting game for a lobby.
-    Only the host can start the game.
+    Start the game for a lobby.
     
-    Args:
-        lobby_id: Lobby ID
-        
     Expected JSON body:
     {
-        "user_id": "user_id"  # Must be the host
+        "user_id": "host_user_id"
     }
     
     Returns:
-        JSON response with game status
+        JSON response with updated lobby status
     """
     try:
         data = request.get_json()
-        user_id = data.get("user_id") if data else None
+        
+        if not data:
+            return jsonify_error("Request body is required", 400)
+        
+        user_id = data.get("user_id")
         
         if not user_id:
-            return jsonify(*format_error_response("user_id is required", 400))
+            return jsonify_error("user_id is required", 400)
         
-        # Get lobby
+        # Verify lobby and ownership
         lobby_response = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
         lobby = lobby_response.data[0]
-        
-        # Check if user is the host
         if lobby.get("host_id") != user_id:
-            return jsonify(*format_error_response("Only the host can start the game", 403))
+            return jsonify_error("Only the host can start the game", 403)
         
-        # Check if lobby is in waiting status
-        if lobby.get("status") != "waiting":
-            return jsonify(*format_error_response("Game can only be started from waiting status", 400))
+        # Initialize rounds if not present
+        if not lobby.get("current_round"):
+            # Get activity counts
+            activity_counts = lobby.get("activity_counts", {})
+            
+            # Generate rounds
+            rounds = []
+            round_num = 1
+            # Defined order
+            valid_cats = ["Food", "Activity", "Arts", "Nature", "Social", "Recreation & Entertainment"]
+            
+            for cat in valid_cats:
+                # Check for direct match or sloppy keys from frontend
+                count = activity_counts.get(cat, 0)
+                if count > 0:
+                    for _ in range(count):
+                        rounds.append({
+                            "round_number": round_num, 
+                            "category": cat, 
+                            "status": "active" if round_num == 1 else "pending"
+                        })
+                        round_num += 1
+            
+            # Fallback
+            if not rounds:
+                rounds = [{"round_number": 1, "category": "Food", "status": "active"}]
+            
+            # Prepare batch data
+            rounds_to_insert = []
+            options_to_insert = []
+            
+            for r in rounds:
+                round_id = generate_uuid()
+                round_data = {
+                    "round_id": round_id,
+                    "lobby_id": lobby_id,
+                    "round_number": r["round_number"],
+                    "category": r["category"],
+                    "status": r["status"],
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                rounds_to_insert.append(round_data)
+                
+                # Seed mock options
+                mock_options = generate_mock_options(lobby_id, r["round_number"], r["category"])
+                options_to_insert.extend(mock_options)
+            
+            # Execute batch inserts
+            if rounds_to_insert:
+                supabase.table("rounds").insert(rounds_to_insert).execute()
+            
+            if options_to_insert:
+                supabase.table("options").insert(options_to_insert).execute()
+            
+            # Update lobby status
+            supabase.table("lobbies").update({
+                "status": "voting",
+                "current_round": 1,
+                "updated_at": datetime.utcnow().isoformat()
+            }).eq("lobby_id", lobby_id).execute()
         
-        # Check if all members are ready (in real app, track ready status)
-        # For now, just check if there are members
-        if len(lobby.get("user_ids", [])) < 1:
-            return jsonify(*format_error_response("Lobby must have at least one member", 400))
-        
-        # Update lobby status to in_progress
-        supabase.table("lobbies").update({
-            "status": "in_progress",
-            "current_round": 1,
-            "updated_at": datetime.utcnow().isoformat()
-        }).eq("lobby_id", lobby_id).execute()
-        
-        # Create rounds based on activity_counts
-        activity_counts = lobby.get("activity_counts", {})
-        round_number = 1
-        
-        for category, count in activity_counts.items():
-            if count > 0:
-                for i in range(count):
-                    round_id = generate_uuid()
-                    round_data = Round(
-                        round_id=round_id,
-                        lobby_id=lobby_id,
-                        round_number=round_number,
-                        category=category,
-                        status="active" if round_number == 1 else "pending"
-                    ).to_dict()
-                    
-                    supabase.table("rounds").insert(round_data).execute()
-                    round_number += 1
-        
-        return jsonify(*format_success_response(
-            {"status": "in_progress", "current_round": 1},
+        return jsonify_success(
+            {"lobby_id": lobby_id, "status": "voting", "current_round": 1},
             "Game started successfully"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
-
-
-@consensus_bp.route("/lobby/<lobby_id>/round/<int:round_number>/options", methods=["GET"])
-def get_round_options(lobby_id, round_number):
-    """
-    Get options for a specific round.
-    Automatically populates options if they don't exist yet.
-    
-    Args:
-        lobby_id: Lobby ID
-        round_number: Round number (1-indexed)
-        
-    Returns:
-        JSON response with list of options
-    """
-    try:
-        # Get round info
-        round_response = supabase.table("rounds").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
-        
-        if not round_response.data:
-            return jsonify(*format_error_response("Round not found", 404))
-        
-        round_data = round_response.data[0]
-        
-        # Get options for this round
-        options_response = supabase.table("options").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
-        
-        options = options_response.data if options_response.data else []
-        
-        # If no options exist, automatically populate them
-        if not options:
-            # Get lobby to get location and radius
-            lobby_response = supabase.table("lobbies").select("location, radius").eq("lobby_id", lobby_id).execute()
-            if lobby_response.data:
-                lobby = lobby_response.data[0]
-                location = lobby.get("location", {})
-                radius = lobby.get("radius", 2.5)
-                category = round_data.get("category", "Food")
-                
-                # Get options from places service
-                option_data_list = get_options_for_round(category, location, radius, count=10)
-                
-                # Insert options into database
-                for opt_data in option_data_list:
-                    option_id = generate_uuid()
-                    option = Option(
-                        option_id=option_id,
-                        lobby_id=lobby_id,
-                        round_number=round_number,
-                        category=category,
-                        name=opt_data.get("name", "Unknown"),
-                        location=opt_data.get("location", {}),
-                        distance=opt_data.get("distance"),
-                        address=opt_data.get("address"),
-                        hours=opt_data.get("hours"),
-                        image_url=opt_data.get("image_url")
-                    )
-                    supabase.table("options").insert(option.to_dict()).execute()
-                
-                # Fetch the newly inserted options
-                options_response = supabase.table("options").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
-                options = options_response.data if options_response.data else []
-        
-        return jsonify(*format_success_response(
-            {
-                "round": round_data,
-                "options": options,
-                "count": len(options)
-            },
-            f"Retrieved {len(options)} options for round {round_number}"
-        ))
-        
-    except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @consensus_bp.route("/lobby/<lobby_id>/vote", methods=["POST"])
 def submit_vote(lobby_id):
     """
-    Submit a vote on an option.
+    Submit a vote for an option.
     
     Expected JSON body:
     {
-        "user_id": "user_id",
-        "option_id": "option_id",
+        "user_id": "string",
+        "option_id": "string",
         "round_number": int,
-        "vote": true  // true for yes, false for no
+        "vote": "like" | "dislike" | "superlike"
     }
     
     Returns:
@@ -188,190 +169,155 @@ def submit_vote(lobby_id):
         data = request.get_json()
         
         if not data:
-            return jsonify(*format_error_response("Request body is required", 400))
+            return jsonify_error("Request body is required", 400)
         
         user_id = data.get("user_id")
         option_id = data.get("option_id")
         round_number = data.get("round_number")
-        vote = data.get("vote")
+        vote_type = data.get("vote")
         
-        if not user_id:
-            return jsonify(*format_error_response("user_id is required", 400))
+        if not all([user_id, option_id, round_number, vote_type]):
+            return jsonify_error("Missing required fields", 400)
         
-        if not option_id:
-            return jsonify(*format_error_response("option_id is required", 400))
+        if vote_type not in ["like", "dislike", "superlike"]:
+            return jsonify_error("Invalid vote type", 400)
         
-        if round_number is None:
-            return jsonify(*format_error_response("round_number is required", 400))
-        
-        if vote is None:
-            return jsonify(*format_error_response("vote is required (true for yes, false for no)", 400))
-        
-        # Check if user is in the lobby
-        lobby_response = supabase.table("lobbies").select("user_ids").eq("lobby_id", lobby_id).execute()
-        if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
-        
-        if user_id not in lobby_response.data[0].get("user_ids", []):
-            return jsonify(*format_error_response("User is not in this lobby", 403))
-        
-        # Check if option exists and belongs to this round
-        option_response = supabase.table("options").select("*").eq("option_id", option_id).eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
-        if not option_response.data:
-            return jsonify(*format_error_response("Option not found for this round", 404))
-        
-        # Check if user already voted on this option
-        existing_vote = supabase.table("votes").select("*").eq("user_id", user_id).eq("option_id", option_id).eq("round_number", round_number).execute()
-        
+        # Record vote
         vote_id = generate_uuid()
+        vote_data = {
+            "vote_id": vote_id,
+            "lobby_id": lobby_id,
+            "user_id": user_id,
+            "option_id": option_id,
+            "round_number": round_number,
+            "vote": (vote_type in ["like", "superlike"]),
+            "created_at": datetime.utcnow().isoformat()
+        }
         
-        if existing_vote.data:
-            # Update existing vote
-            supabase.table("votes").update({
-                "vote": bool(vote),
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("vote_id", existing_vote.data[0].get("vote_id")).execute()
-        else:
-            # Create new vote
-            vote_data = Vote(
-                vote_id=vote_id,
-                user_id=user_id,
-                option_id=option_id,
-                lobby_id=lobby_id,
-                round_number=round_number,
-                vote=bool(vote)
-            ).to_dict()
-            
+        try:
             supabase.table("votes").insert(vote_data).execute()
+        except Exception as vote_err:
+             # Just in case unique constraint or something fails, though uuids are unique
+             return jsonify_error(f"Failed to record vote: {str(vote_err)}", 500)
         
-        return jsonify(*format_success_response(
-            {"vote_id": vote_id, "vote": bool(vote)},
-            "Vote submitted successfully"
-        ))
+        return jsonify_success(vote_data, "Vote submitted successfully", 201)
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @consensus_bp.route("/lobby/<lobby_id>/round/<int:round_number>/status", methods=["GET"])
 def get_round_status(lobby_id, round_number):
     """
-    Get the status of a voting round, including vote counts and consensus status.
+    Get status of a specific round, including consensus check.
     
     Args:
         lobby_id: Lobby ID
         round_number: Round number
         
     Returns:
-        JSON response with round status, vote counts, and consensus info
+        JSON response with round status and consensus result if any
     """
     try:
         # Get round
         round_response = supabase.table("rounds").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
         if not round_response.data:
-            return jsonify(*format_error_response("Round not found", 404))
+            return jsonify_error("Round not found", 404)
         
         round_data = round_response.data[0]
         
-        # Get lobby to get user count
-        lobby_response = supabase.table("lobbies").select("user_ids").eq("lobby_id", lobby_id).execute()
-        if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
-        
-        total_users = len(lobby_response.data[0].get("user_ids", []))
-        
+        # Check for consensus (simplified logic)
         # Get all votes for this round
         votes_response = supabase.table("votes").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
         votes = votes_response.data if votes_response.data else []
         
-        # Get options for this round
-        options_response = supabase.table("options").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
-        options = options_response.data if options_response.data else []
-        
-        # Count votes per option (only yes votes count for consensus)
-        option_vote_counts = {}
-        user_votes = {}  # Track which users have voted
-        
+        # Count votes per option
+        option_scores = {}
         for vote in votes:
-            option_id = vote.get("option_id")
-            user_id = vote.get("user_id")
-            is_yes = vote.get("vote", False)
+            opt_id = vote.get("option_id")
+            v_type = vote.get("vote")
+            score = 1 if v_type else -1
+            option_scores[opt_id] = option_scores.get(opt_id, 0) + score
+        
+        # Determine if consensus reached (e.g., all members voted, or high score threshold)
+        consensus_reached = False
+        winning_option_id = None
+        
+        print(f"DEBUG: Votes count: {len(votes)}")
+        print(f"DEBUG: Option scores: {option_scores}")
+
+        if option_scores:
+            best_option = max(option_scores.items(), key=lambda x: x[1])
+            print(f"DEBUG: Best option: {best_option}")
             
-            user_votes[user_id] = True
-            
-            if is_yes:
-                if option_id not in option_vote_counts:
-                    option_vote_counts[option_id] = []
-                option_vote_counts[option_id].append(user_id)
+            if best_option[1] > 0: # Threshold logic
+                winning_option_id = best_option[0]
+                consensus_reached = True
+                print(f"DEBUG: Consensus reached! Winner: {winning_option_id}")
+            else:
+                print(f"DEBUG: Best score {best_option[1]} <= 0, no consensus")
+        else:
+             print("DEBUG: No option scores calculated")
         
-        # Check for consensus (all users voted yes on same option)
-        consensus_option_id = None
-        tied_options = []
-        
-        for option_id, voters in option_vote_counts.items():
-            if len(voters) == total_users:
-                if consensus_option_id is None:
-                    consensus_option_id = option_id
-                else:
-                    # Multiple options with all yes votes = tie
-                    tied_options = [consensus_option_id, option_id]
-                    consensus_option_id = None
-                    break
-        
-        # Check if all users have voted
-        all_voted = len(user_votes) == total_users
-        
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
-                "round": round_data,
-                "total_users": total_users,
-                "users_voted": len(user_votes),
-                "all_voted": all_voted,
-                "option_vote_counts": {opt_id: len(voters) for opt_id, voters in option_vote_counts.items()},
-                "consensus_reached": consensus_option_id is not None,
-                "consensus_option_id": consensus_option_id,
-                "is_tie": len(tied_options) > 0,
-                "tied_options": tied_options
+                "round_id": round_data.get("round_id"),
+                "status": round_data.get("status"),
+                "consensus_reached": consensus_reached,
+                "winning_option_id": winning_option_id,
+                "scores": option_scores
             },
             "Round status retrieved successfully"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @consensus_bp.route("/lobby/<lobby_id>/waiting", methods=["GET"])
 def get_waiting_status(lobby_id):
     """
-    Get waiting status - check which users have finished voting.
+    Get waiting status to see who has finished voting for the current round.
     
     Args:
         lobby_id: Lobby ID
         
     Returns:
-        JSON response with waiting status and list of users still voting
+        JSON response with list of finished users
     """
     try:
-        # Get lobby
+        # Get lobby to know current round and members
         lobby_response = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
         lobby = lobby_response.data[0]
+        current_round = lobby.get("current_round")
         user_ids = lobby.get("user_ids", [])
-        current_round = lobby.get("current_round", 1)
         
-        # Get all rounds for this lobby
-        rounds_response = supabase.table("rounds").select("*").eq("lobby_id", lobby_id).order("round_number").execute()
+        if not current_round:
+             return jsonify_success(
+                {"status": "waiting_to_start", "users_finished": []},
+                "Lobby has not started"
+            )
+
+        # Get all available options for this round to know how many to vote on
+        rounds_response = supabase.table("rounds").select("round_id").eq("lobby_id", lobby_id).eq("round_number", current_round).execute()
+        
+        # Check rounds exist
         rounds = rounds_response.data if rounds_response.data else []
+        if not rounds:
+             return jsonify_success(
+                {"status": "no_round", "users_finished": []},
+                "Round not found"
+            )
+            
+        # Inspect options count
+        options_response = supabase.table("options").select("option_id").eq("lobby_id", lobby_id).eq("round_number", current_round).execute()
+        option_ids = [o.get("option_id") for o in (options_response.data if options_response.data else [])]
         
-        # For each user, check if they've voted on all options in current round
         users_finished = []
         users_waiting = []
-        
-        # Get all options for current round
-        options_response = supabase.table("options").select("option_id").eq("lobby_id", lobby_id).eq("round_number", current_round).execute()
-        option_ids = [opt.get("option_id") for opt in (options_response.data if options_response.data else [])]
         
         # Get user details for username mapping
         users_data = {}
@@ -396,7 +342,7 @@ def get_waiting_status(lobby_id):
         # Map user IDs to usernames for waiting users
         users_waiting_usernames = [users_data.get(uid, f"User {uid[:8]}") for uid in users_waiting]
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
                 "current_round": current_round,
                 "total_users": len(user_ids),
@@ -406,10 +352,50 @@ def get_waiting_status(lobby_id):
                 "total_rounds": len(rounds)
             },
             "Waiting status retrieved successfully"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
+
+
+@consensus_bp.route("/lobby/<lobby_id>/round/<int:round_number>/options", methods=["GET"])
+def get_round_options(lobby_id, round_number):
+    """
+    Get options for a specific round, including round metadata.
+    
+    Args:
+        lobby_id: Lobby ID
+        round_number: Round number
+        
+    Returns:
+        JSON response with round details and list of options
+    """
+    try:
+        # Get round details first
+        round_response = supabase.table("rounds").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
+        
+        round_info = {}
+        if round_response.data:
+            round_info = round_response.data[0]
+        else:
+            # If round doesn't exist (edge case), try to infer or return minimal info
+            round_info = {"category": "Unknown", "round_number": round_number}
+
+        options_response = supabase.table("options").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
+        
+        fetched_options = []
+        if options_response.data:
+            fetched_options = [Option.from_dict(opt).to_dict() for opt in options_response.data]
+
+        response_data = {
+            "round": round_info,
+            "options": fetched_options
+        }
+        
+        return jsonify_success(response_data, f"Retrieved {len(fetched_options)} options for round {round_number}")
+        
+    except Exception as e:
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @consensus_bp.route("/lobby/<lobby_id>/round/<int:round_number>/options", methods=["POST"])
@@ -439,17 +425,17 @@ def add_round_options(lobby_id, round_number):
         data = request.get_json()
         
         if not data:
-            return jsonify(*format_error_response("Request body is required", 400))
+            return jsonify_error("Request body is required", 400)
         
         options_data = data.get("options", [])
         
         if not options_data or not isinstance(options_data, list):
-            return jsonify(*format_error_response("options must be a non-empty array", 400))
+            return jsonify_error("options must be a non-empty array", 400)
         
         # Verify round exists
         round_response = supabase.table("rounds").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
         if not round_response.data:
-            return jsonify(*format_error_response("Round not found", 404))
+            return jsonify_error("Round not found", 404)
         
         round_data = round_response.data[0]
         
@@ -474,16 +460,16 @@ def add_round_options(lobby_id, round_number):
             supabase.table("options").insert(option_dict).execute()
             added_options.append(option_dict)
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
                 "options": added_options,
                 "count": len(added_options)
             },
             f"Added {len(added_options)} options to round {round_number}"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
 
 
 @consensus_bp.route("/lobby/<lobby_id>/round/<int:round_number>/complete", methods=["POST"])
@@ -505,31 +491,32 @@ def complete_round(lobby_id, round_number):
         data = request.get_json()
         
         if not data:
-            return jsonify(*format_error_response("Request body is required", 400))
+            return jsonify_error("Request body is required", 400)
         
         selected_option_id = data.get("selected_option_id")
         user_id = data.get("user_id")
         
         if not selected_option_id:
-            return jsonify(*format_error_response("selected_option_id is required", 400))
+            return jsonify_error("selected_option_id is required", 400)
         
         # Get round
         round_response = supabase.table("rounds").select("*").eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
         if not round_response.data:
-            return jsonify(*format_error_response("Round not found", 404))
+            return jsonify_error("Round not found", 404)
         
         round_data = round_response.data[0]
         
         # Verify option exists
         option_response = supabase.table("options").select("*").eq("option_id", selected_option_id).eq("lobby_id", lobby_id).eq("round_number", round_number).execute()
         if not option_response.data:
-            return jsonify(*format_error_response("Option not found for this round", 404))
+            return jsonify_error("Option not found for this round", 404)
         
         # Update round status
         supabase.table("rounds").update({
             "status": "completed",
             "selected_option_id": selected_option_id,
             "completed_at": datetime.utcnow().isoformat()
+            # removed updated_at as it doesn't exist in rounds table
         }).eq("round_id", round_data.get("round_id")).execute()
         
         # Check if all rounds are completed
@@ -550,6 +537,7 @@ def complete_round(lobby_id, round_number):
             if next_round and next_round.get("status") == "pending":
                 supabase.table("rounds").update({
                     "status": "active"
+                # removed updated_at as it doesn't exist in rounds table
                 }).eq("round_id", next_round.get("round_id")).execute()
                 
                 # Update lobby current_round
@@ -558,7 +546,7 @@ def complete_round(lobby_id, round_number):
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("lobby_id", lobby_id).execute()
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
                 "round_number": round_number,
                 "selected_option_id": selected_option_id,
@@ -566,8 +554,7 @@ def complete_round(lobby_id, round_number):
                 "next_round": round_number + 1 if not all_completed else None
             },
             "Round completed successfully"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
-
+        return jsonify_error(f"Internal server error: {str(e)}", 500)

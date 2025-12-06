@@ -5,7 +5,7 @@ Handles final match retrieval endpoints and itinerary generation.
 
 from flask import Blueprint, request, jsonify
 from supabase_client import supabase
-from utils.helpers import format_error_response, format_success_response
+from utils.helpers import jsonify_error, jsonify_success
 
 result_bp = Blueprint("result", __name__)
 
@@ -25,7 +25,7 @@ def get_itinerary(lobby_id):
         # Get lobby
         lobby_response = supabase.table("lobbies").select("*").eq("lobby_id", lobby_id).execute()
         if not lobby_response.data:
-            return jsonify(*format_error_response("Lobby not found", 404))
+            return jsonify_error("Lobby not found", 404)
         
         lobby = lobby_response.data[0]
         
@@ -56,7 +56,7 @@ def get_itinerary(lobby_id):
                         "round_number": round_data.get("round_number")
                     })
         
-        return jsonify(*format_success_response(
+        return jsonify_success(
             {
                 "lobby_id": lobby_id,
                 "date": lobby.get("date"),
@@ -66,8 +66,7 @@ def get_itinerary(lobby_id):
                 "count": len(itinerary)
             },
             f"Retrieved itinerary with {len(itinerary)} activities"
-        ))
+        )
         
     except Exception as e:
-        return jsonify(*format_error_response(f"Internal server error: {str(e)}", 500))
-
+        return jsonify_error(f"Internal server error: {str(e)}", 500)
